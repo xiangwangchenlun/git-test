@@ -350,8 +350,5 @@ def play_game():
             for player in players:
                 print(f"{player['name']}: {player['chips']} 筹码")
             break
-
-
-
 # 运行游戏
 play_game()
