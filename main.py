@@ -5,8 +5,6 @@ import itertools
 suits = ['♠', '♥', '♣', '♦']
 ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
 deck = [f"{suit}{rank}" for suit in suits for rank in ranks]
-
-# 牌值映射
 rank_value = {rank: i for i, rank in enumerate(ranks)}
 
 
@@ -56,7 +54,7 @@ def evaluate_hand(hand):
 
 
 def compare_hands(hand1, hand2):
-    """比较两手牌大小"""
+    """比较两手牌大小（无花色比较）"""
     type1, ranks1, _ = evaluate_hand(hand1)
     type2, ranks2, _ = evaluate_hand(hand2)
 
@@ -66,12 +64,7 @@ def compare_hands(hand1, hand2):
         for r1, r2 in zip(ranks1, ranks2):
             if r1 != r2:
                 return 1 if r1 > r2 else -1
-        suits1 = sorted([get_card_suit(card) for card in hand1], key=lambda x: suits.index(x), reverse=True)
-        suits2 = sorted([get_card_suit(card) for card in hand2], key=lambda x: suits.index(x), reverse=True)
-        for s1, s2 in zip(suits1, suits2):
-            if s1 != s2:
-                return 1 if suits.index(s1) > suits.index(s2) else -1
-        return 0
+        return 0  # 点数相同，返回平局
 
 
 def select_best_three(hand):
@@ -85,36 +78,34 @@ def select_best_three(hand):
         if score[:2] > best_score[:2]:
             best_score = score
             best_combination = list(combo)
-        elif score[:2] == best_score[:2]:
-            current_suits = sorted([get_card_suit(card) for card in combo], key=lambda x: suits.index(x), reverse=True)
-            best_suits = sorted([get_card_suit(card) for card in best_combination], key=lambda x: suits.index(x),
-                                reverse=True)
-            if current_suits > best_suits:
-                best_combination = list(combo)
-                best_score = score
     return best_combination
 
 
-def ai_decision(player, current_bet, seen):
-    """AI简单决策逻辑"""
+def ai_decision(player, current_bet, seen, pot, round_num):
+    """AI 决策逻辑"""
     hand_strength = evaluate_hand(select_best_three(player["hand"]))[0]
     if player["chips"] < current_bet * (2 if seen else 1):
         return "fold"
+
+    pot_odds = current_bet / (pot + current_bet) if pot + current_bet > 0 else 1.0
+
     if not seen:
-        if hand_strength >= 3:
-            return random.choice(["raise", "call"])
-        elif random.random() < 0.3:
-            return "see"
-        elif random.random() < 0.2:
-            return "fold"
-        else:
-            return "call"
-    else:
         if hand_strength >= 4:
             return "raise"
-        elif hand_strength >= 2:
+        elif hand_strength >= 2 and pot_odds < 0.3:
             return random.choice(["raise", "call"])
-        elif hand_strength == 1 and random.random() < 0.5:
+        elif random.random() < 0.4 and round_num <= 3:
+            return "see"
+        elif pot_odds < 0.2:
+            return "call"
+        else:
+            return "fold"
+    else:
+        if hand_strength >= 4 and round_num >= 2:  # 从第二轮开始允许比牌
+            return "compare"
+        elif hand_strength >= 3:
+            return "raise"
+        elif hand_strength >= 1 and pot_odds < 0.25:
             return "call"
         else:
             return "fold"
@@ -158,13 +149,23 @@ def play_single_game(num_cards, players):
                 print(f"你的牌: {players[0]['hand']}")
                 print(f"最佳3张牌（按炸金花规则）: {select_best_three(players[0]['hand'])}")
             print("你的筹码:", players[0]["chips"])
-            print("选择行动: (1) 看牌, (2) 跟注, (3) 加注, (4) 弃牌, (5) 比牌")
+            if round_num == 1:
+                print("选择行动: (1) 看牌, (2) 跟注, (3) 加注, (4) 弃牌")
+            else:
+                print("选择行动: (1) 看牌, (2) 跟注, (3) 加注, (4) 弃牌, (5) 比牌")
+
             while True:
                 try:
-                    choice = input("输入行动编号 (1-5): ")
-                    if choice not in ["1", "2", "3", "4", "5"]:
-                        print("无效输入，请输入 1-5")
-                        continue
+                    if round_num == 1:
+                        choice = input("输入行动编号 (1-4): ")
+                        if choice not in ["1", "2", "3", "4"]:
+                            print("无效输入，请输入 1-4")
+                            continue
+                    else:
+                        choice = input("输入行动编号 (1-5): ")
+                        if choice not in ["1", "2", "3", "4", "5"]:
+                            print("无效输入，请输入 1-5")
+                            continue
                     break
                 except:
                     print("输入错误，请重新输入")
@@ -173,7 +174,19 @@ def play_single_game(num_cards, players):
                 players[0]["seen"] = True
                 print(f"你看了牌: {players[0]['hand']}")
                 print(f"最佳3张牌（按炸金花规则）: {select_best_three(players[0]['hand'])}")
-            elif choice == "2":
+                print("你已看牌，请选择: (2) 跟注, (3) 加注, (4) 弃牌")
+                while True:
+                    try:
+                        sub_choice = input("输入行动编号 (2-4): ")
+                        if sub_choice not in ["2", "3", "4"]:
+                            print("无效输入，请输入 2-4")
+                            continue
+                        break
+                    except:
+                        print("输入错误，请重新输入")
+                choice = sub_choice
+
+            if choice == "2":
                 bet = current_bet * (2 if players[0]["seen"] else 1)
                 if players[0]["chips"] >= bet:
                     players[0]["chips"] -= bet
@@ -184,9 +197,10 @@ def play_single_game(num_cards, players):
                     players[0]["folded"] = True
             elif choice == "3":
                 try:
-                    raise_amount = int(input(f"输入加注金额 (至少 {current_bet + 10}): "))
-                    if raise_amount < current_bet + 10:
-                        print("加注金额过低")
+                    min_raise = current_bet * 2 if players[0]["seen"] else current_bet + 10
+                    raise_amount = int(input(f"输入加注金额 (至少 {min_raise}): "))
+                    if raise_amount < min_raise:
+                        print(f"加注金额过低，至少为 {min_raise}")
                         continue
                     bet = raise_amount * (2 if players[0]["seen"] else 1)
                     if players[0]["chips"] >= bet:
@@ -202,21 +216,43 @@ def play_single_game(num_cards, players):
             elif choice == "4":
                 players[0]["folded"] = True
                 print("你弃牌")
-            elif choice == "5":
+            elif choice == "5" and round_num > 1:
                 active_opponents = [p for p in players[1:] if not p["folded"]]
                 if not active_opponents:
                     print("所有对手已弃牌，无法比牌")
                 else:
-                    break
+                    opponent = random.choice(active_opponents)
+                    player_hand = select_best_three(players[0]["hand"])
+                    opponent_hand = select_best_three(opponent["hand"])
+                    result = compare_hands(player_hand, opponent_hand)
+                    print(f"\n比牌: 你的牌 {player_hand} vs {opponent['name']}的牌 {opponent_hand}")
+                    if result > 0:
+                        print(f"你获胜！{opponent['name']} 弃牌")
+                        opponent["folded"] = True
+                    elif result < 0:
+                        print(f"{opponent['name']} 获胜！你弃牌")
+                        players[0]["folded"] = True
+                    else:
+                        print("平局！双方继续")
+                    bet = current_bet * (2 if players[0]["seen"] else 1)
+                    if players[0]["chips"] >= bet and not players[0]["folded"]:
+                        players[0]["chips"] -= bet
+                        pot += bet
+                        print(f"你因比牌额外下注: {bet}, 剩余筹码: {players[0]['chips']}")
+                    if opponent["chips"] >= bet and not opponent["folded"]:
+                        opponent["chips"] -= bet
+                        pot += bet
+                        print(f"{opponent['name']} 因比牌额外下注: {bet}, 剩余筹码: {opponent['chips']}")
 
-        # AI行动
+        # AI 行动
         for i in range(1, 4):
             if not players[i]["folded"]:
-                ai_action = ai_decision(players[i], current_bet, players[i]["seen"])
+                ai_action = ai_decision(players[i], current_bet, players[i]["seen"], pot, round_num)
                 if ai_action == "see":
                     players[i]["seen"] = True
                     print(f"{players[i]['name']} 看牌")
-                elif ai_action == "call":
+                    ai_action = ai_decision(players[i], current_bet, True, pot, round_num)
+                if ai_action == "call":
                     bet = current_bet * (2 if players[i]["seen"] else 1)
                     if players[i]["chips"] >= bet:
                         players[i]["chips"] -= bet
@@ -226,7 +262,7 @@ def play_single_game(num_cards, players):
                         print(f"{players[i]['name']} 筹码不足，自动弃牌")
                         players[i]["folded"] = True
                 elif ai_action == "raise":
-                    raise_amount = current_bet + random.randint(10, 20)
+                    raise_amount = current_bet * 2 if players[i]["seen"] else current_bet + random.randint(10, 20)
                     bet = raise_amount * (2 if players[i]["seen"] else 1)
                     if players[i]["chips"] >= bet:
                         players[i]["chips"] -= bet
@@ -239,6 +275,32 @@ def play_single_game(num_cards, players):
                 elif ai_action == "fold":
                     players[i]["folded"] = True
                     print(f"{players[i]['name']} 弃牌")
+                elif ai_action == "compare" and round_num > 1:
+                    active_opponents = [p for p in players if not p["folded"] and p != players[i]]
+                    if active_opponents:
+                        opponent = random.choice(active_opponents)
+                        player_hand = select_best_three(players[i]["hand"])
+                        opponent_hand = select_best_three(opponent["hand"])
+                        result = compare_hands(player_hand, opponent_hand)
+                        print(
+                            f"\n比牌: {players[i]['name']} 的牌 {player_hand} vs {opponent['name']} 的牌 {opponent_hand}")
+                        if result > 0:
+                            print(f"{players[i]['name']} 获胜！{opponent['name']} 弃牌")
+                            opponent["folded"] = True
+                        elif result < 0:
+                            print(f"{opponent['name']} 获胜！{players[i]['name']} 弃牌")
+                            players[i]["folded"] = True
+                        else:
+                            print("平局！双方继续")
+                        bet = current_bet * (2 if players[i]["seen"] else 1)
+                        if players[i]["chips"] >= bet and not players[i]["folded"]:
+                            players[i]["chips"] -= bet
+                            pot += bet
+                            print(f"{players[i]['name']} 因比牌额外下注: {bet}, 剩余筹码: {players[i]['chips']}")
+                        if opponent["chips"] >= bet and not opponent["folded"]:
+                            opponent["chips"] -= bet
+                            pot += bet
+                            print(f"{opponent['name']} 因比牌额外下注: {bet}, 剩余筹码: {opponent['chips']}")
 
         # 检查游戏是否结束
         active_players = [p for p in players if not p["folded"]]
@@ -269,25 +331,39 @@ def play_single_game(num_cards, players):
 
     # 比牌
     print("\n=== 比牌 ===")
-    best_player = None
+    best_players = []
     best_hand = None
     best_score = (-1, [])
     for player in active_players:
         final_hand = select_best_three(player["hand"])
         score = evaluate_hand(final_hand)
         if not best_hand or compare_hands(final_hand, best_hand) > 0:
-            best_player = player
+            best_players = [player]
             best_hand = final_hand
             best_score = score
+        elif compare_hands(final_hand, best_hand) == 0:
+            best_players.append(player)
 
-    best_player["chips"] += pot
-    print(f"\n{best_player['name']} 获胜，赢得底池: {pot}")
+    if len(best_players) == 1:
+        best_players[0]["chips"] += pot
+        print(f"\n{best_players[0]['name']} 获胜，赢得底池: {pot}")
+    else:
+        split_pot = pot // len(best_players)
+        for player in best_players:
+            player["chips"] += split_pot
+            print(f"\n{player['name']} 平局，赢得底池部分: {split_pot}")
     return True
 
 
 def play_game():
     """循环运行炸金花游戏"""
     print("欢迎体验4人炸金花！")
+    print("规则说明：")
+    print("- 牌型顺序：豹子 > 同花顺 > 同花 > 顺子 > 对子 > 单张")
+    print("- 第一轮不能比牌，从第二轮开始允许比牌")
+    print("- 看牌后需立即选择跟注、加注或弃牌")
+    print("- 看牌后跟注或加注金额为未看牌的两倍")
+    print("- 比牌需额外下注，输者弃牌")
 
     # 获取发牌数量
     while True:
@@ -320,8 +396,8 @@ def play_game():
             if player["chips"] <= 0:
                 print(f"\n{player['name']} 筹码为0，游戏结束！")
                 print("\n最终筹码：")
-                for p in players:
-                    print(f"{p['name']}: {p['chips']} 筹码")
+                for player in players:
+                    print(f"{player['name']}: {player['chips']} 筹码")
                 return
 
         # 显示筹码
@@ -334,8 +410,8 @@ def play_game():
         if len(active_players) < 2:
             print("\n游戏结束：少于2名玩家有足够筹码！")
             print("\n最终筹码：")
-            for p in players:
-                print(f"{p['name']}: {p['chips']} 筹码")
+            for player in players:
+                print(f"{player['name']}: {player['chips']} 筹码")
             break
 
         # 询问是否继续
@@ -350,5 +426,7 @@ def play_game():
             for player in players:
                 print(f"{player['name']}: {player['chips']} 筹码")
             break
+
+
 # 运行游戏
 play_game()
